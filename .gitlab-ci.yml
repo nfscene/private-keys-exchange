@@ -1,0 +1,15 @@
+stages:
+  - test
+
+test_contracts:
+  image: node:slim
+  stage: test
+  before_script:
+    - npm install -g truffle
+    - npm install -g ganache
+    - ganache -p 8545 &
+    - npm install
+  script:
+    - truffle test
+  retry:
+    max: 2
