@@ -1,17 +1,15 @@
 pragma solidity ^0.8.0;
 
 import "./Article.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "./Response.sol";
 
 contract Exchange {
     address public immutable article;
     address payable public immutable buyer;
-    bytes public buyerPublicKey;
-    address payable public keyProvider;
     uint256 public fees;
-    bytes public encryptedPrivateKey;
-    bytes public signaturePrivateKey;
+    bytes public buyerPublicKey;
     Status public status;
+    address public response;
 
     enum Status {
         ACTIVE,
@@ -22,9 +20,9 @@ contract Exchange {
 
     constructor(address _article, uint256 _fees, bytes memory _publicKey) payable {
         require(msg.value == Article(_article).getPrice() * 2 + _fees);
-        fees = _fees;
         article = _article;
         buyer = payable(tx.origin);
+        fees = _fees;
         buyerPublicKey = _publicKey;
         status = Status.ACTIVE;
     }
@@ -44,16 +42,12 @@ contract Exchange {
     }
 
     modifier withoutResponse {
-        require(encryptedPrivateKey.length == 0);
-        require(signaturePrivateKey.length == 0);
-        require(keyProvider == payable(address(0)));
+        require(response == address(0));
         _;
     }
 
     modifier withResponse {
-        require(encryptedPrivateKey.length != 0);
-        require(signaturePrivateKey.length != 0);
-        require(keyProvider != payable(address(0)));
+        require(response != address(0));
         _;
     }
 
@@ -70,33 +64,23 @@ contract Exchange {
         return buyer;
     }
 
-    function response(bytes memory _encryptedPrivateKey, bytes memory _signaturePrivateKey) public onlyActive withoutResponse {
-        require(verify(_encryptedPrivateKey, _signaturePrivateKey));
-        encryptedPrivateKey = _encryptedPrivateKey;
-        signaturePrivateKey = _signaturePrivateKey;
-        keyProvider = payable(msg.sender);
+    function createResponse(bytes memory _encryptedPrivateKey, bytes memory _signaturePrivateKey) external payable withoutResponse {
+        response = address(new Response(_encryptedPrivateKey, _signaturePrivateKey, article));
     }
 
-    function getSignatureTrace(bytes memory _message, bytes memory _signature) public pure returns (address) {
-        //return ECDSA.recover(keccak256(_message), _signature);
-        return ECDSA.recover(keccak256(_message), _signature);
-    }
-
-    function getPubKeyTrace() public view returns (address){
-        //return address(bytes20(keccak256(Article(article).getPublicKey())));
-        return address(bytes20(Article(article).getPublicKey()));
-    }
-
-    function verify(bytes memory _message, bytes memory _signature) public view returns (bool) {
-        return getSignatureTrace(_message, _signature) == getPubKeyTrace();
+    function getResponse() public view returns (address) {
+        return response;
     }
 
     function validate() public onlyBuyer onlyActive withResponse {
         Article _article = Article(article);
         uint256 _price = _article.getPrice();
         _article.getSeller().transfer(_price);
-        buyer.transfer(_price);
-        keyProvider.transfer(address(this).balance - 2 * _price);
+
+        Response _response = Response(response);
+        _response.getProvider().transfer(fees);
+
+        buyer.transfer(address(this).balance);
         status = Status.VALID;
     }
 }
